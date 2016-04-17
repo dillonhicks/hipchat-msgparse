@@ -1,0 +1,128 @@
+#!/usr/bin/env python
+import sys
+import argparse
+import asyncio
+import logging
+
+from enum import Enum
+
+from msgparse.parser import parse_message
+from msgparse.server import runserver
+
+LOG = logging.getLogger('msgparse')
+
+KiB = 2 ** 10
+
+class runtime_ctx:
+    """Hand constructed context class we can pass around without needing a
+    config and global variables. This is almost definitely not a good
+    for any specific usecase, but great for this example.
+    """
+
+    # Half open range [min, max)
+    version_min = (3, 4, 4)
+    version_max = (3, 5, 0)
+
+    loop = None
+
+    class message:
+        """Arbitrary but reasonable"""
+        max_urls = 4
+        max_size = 4 * KiB
+
+
+class Error(Enum):
+    def __init__(self, code, message):
+        self.code = code
+        self.message = message
+
+    def __str__(self):
+        return repr(self)
+
+    def __repr__(self):
+        return '<Error({}, {})>'.format(self.code, self.message)
+
+    none = (0, 'Ok')
+    bad_pyversion = (1, 'Invalid Python Version')
+    fault = (2, 'Unhandled runtime fault')
+
+
+
+def check_version():
+    return (runtime_ctx.version_min <= sys.version_info) and \
+        (sys.version_info < runtime_ctx.version_max)
+
+
+def parse_arguments():
+    parser = argparse.ArgumentParser(
+        description='Extract special symbols from a message',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+
+    parser.add_argument('-d', '--debug', action='store_true', default=False,
+                        help='Turn on debug logging')
+
+    parser.add_argument('-x', '--extreme', action='store_true', default=False,
+                        help='Turn the parsing limits up to 11 '
+                        '(msg size: 1GiB, url count: 1M)')
+
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument('-c', '--content', nargs='+')
+    group.add_argument('-s', '--server', action='store_true', default=False,
+                       help='Run the parser as a unix socket TCP server')
+
+    return parser.parse_args()
+
+def run(args):
+
+    if args.server:
+        runserver(runtime_ctx)
+
+    else:
+        for raw_content in args.content:
+            content = raw_content[:runtime_ctx.message.max_size]
+            parser = parse_message(runtime_ctx, content)
+            result = runtime_ctx.loop.run_until_complete(parser)
+            print(result)
+
+
+def main():
+
+    if not check_version():
+        LOG.error('Exit: %s', Error.bad_pyversion)
+        raise SystemExit(Error.bad_pyversion.code)
+
+    args = parse_arguments()
+
+    if args.debug:
+        logging.basicConfig(level=logging.DEBUG)
+
+    if args.extreme:
+        runtime_ctx.message.max_size = KiB * KiB * KiB # GiB
+        runtime_ctx.message.max_urls = 10 ** 6
+
+    LOG.debug('Initalizing asyncio event loop')
+    runtime_ctx.loop  = asyncio.get_event_loop()
+    returncode = Error.none
+
+    try:
+        run(args)
+    except Exception as e:
+        LOG.exception('Unhandled exception')
+        returncode = Error.fault
+
+    LOG.debug('Stopping asyncio event loop')
+    runtime_ctx.loop.stop()
+    runtime_ctx.loop.close()
+
+
+    if (returncode.code == 0):
+        LOG.debug('Exit: %s', returncode)
+    else:
+        LOG.error('Exit: %s', returncode)
+
+    raise SystemExit(returncode.code)
+
+
+if __name__ == '__main__':
+    # OS ambivalent entry point
+    main()
