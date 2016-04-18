@@ -6,6 +6,7 @@ __all__ = ('LRUCache',)
 
 LOG = logging.getLogger(__name__)
 
+
 class _EntryMissing(object):
     def __repr__(self):
         return '<Entry: Missing>'
@@ -14,10 +15,11 @@ class _EntryMissing(object):
 #: such that None is still a valid entry.
 _MISSING = _EntryMissing()
 
+
 class LRUCache:
     """Fixed size LRUCache backed by an OrderedDict.
 
-    .. note:: LRUCache is not threadsafe.
+    .. note:: LRUCache is not thread safe.
     """
 
     def __init__(self, max_size=128):
@@ -43,7 +45,7 @@ class LRUCache:
         return None
 
     def set(self, key, value):
-        """Set a cache entry. If the number of entries exceends the max_size,
+        """Set a cache entry. If the number of entries exceeds the max_size,
         then `set` will evict items from the cache until it equal to
         max_size.
 
@@ -59,7 +61,6 @@ class LRUCache:
         LOG.debug('Cache size: %s', len(self.queue))
         while len(self.queue) > self.max_size:
             self.queue.popitem(last=False)
-
 
     def clear(self):
         """Clear the cache"""

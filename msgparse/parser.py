@@ -4,12 +4,9 @@
 import asyncio
 import logging
 
-from requests.exceptions import ConnectionError, HTTPError
-
 from .cache import LRUCache
-from .utils import (ident, unique, first, filterdict, immutable,
+from .utils import (unique, first, filterdict, immutable,
                     Pattern, HTML, HTTP, Tag, Response)
-
 
 __all__ = ('parse_message',)
 
@@ -22,20 +19,19 @@ _NET_TIMEOUT = 1.0 # sec
 _is_title = Tag.is_('title')
 
 #: In a production setting this should be a caching service.
-#: However, a LRUCache should suffice for demonstraions.
+#: However, a LRUCache should suffice for demonstrations.
 _cache = LRUCache()
 
 #: Fields of the message response
-Field = immutable('MessageFields',
-    emoticons='emoticons',
-    mentions='mentions',
-    links='links',
-)
+Field = immutable('MessageFields', emoticons='emoticons', mentions='mentions', links='links')
+Link = immutable('Link', url='url', title='title')
+
 
 @asyncio.coroutine
 def _format_link(ctx, url):
     """Format the url as the dict containing both the url and title::
 
+          >>> loop = asyncio.get_event_loop()
           >>> url = 'http://dillonhicks.io'
           >>> link = loop.run_until_complete(ctx, url)
           >>> print(link)
@@ -51,7 +47,7 @@ def _format_link(ctx, url):
     :returns: dict containing the url and the title or, on failure, None
     """
 
-    if not Pattern.http_prefix.search(url):
+    if Pattern.http_prefix.search(url) is None:
         url = 'http://' + url
 
     entry = _cache.get(url)
@@ -62,12 +58,8 @@ def _format_link(ctx, url):
         LOG.debug('Fetching url: %s', url)
         resp = yield from ctx.loop.run_in_executor(None, HTTP.get, url)
 
-        if resp.status_code != HTTP.ok:
-            # Short circut parsing possibly bogus content
-            return None
-
     except Exception as e:
-        LOG.debug('An error occured while fetching %s', url)
+        LOG.exception('An error occurred while fetching %s', url)
 
         # In a production setting, there may be different ways we want
         # to handle this. Do we add the None value to the cache for a
@@ -76,23 +68,29 @@ def _format_link(ctx, url):
 
     content_type = resp.headers.get('Content-Type', '')
 
-    if Pattern.content_html.search(content_type) is None:
-        # e.g. we will not try to parse mime-type/jpg for a title.
+    if Pattern.content_html.search(content_type) is None \
+            or resp.status_code != HTTP.ok:
 
-        LOG.debug('Skipping processing content of %s, it is not html', url)
-        return None
+        # Short circuit - we will not try to parse
+        # mime-type/jpg for a title or error pages.
+        LOG.debug('Skipping processing content of %s', url)
 
-    # Lazily and tteratively parse the XHTML document until we find the
+        return {
+            Link.url: url,
+            Link.title: url
+        }
+
+    # Lazily and iteratively parse the XHTML document until we find the
     # first title tag and extract the text from that tag.
     tags = HTML.iter(resp.content)
     title = first(tag.text for tag in tags if _is_title(tag))
 
     if title is None:
-        title = url[:16] + '...'
+        title = url
 
     link = {
-        'url' : url,
-        'title' : Pattern.multi_ws.sub(' ', title) # collapse running whitespace
+        Link.url: url,
+        Link.title: Pattern.multi_ws.sub(' ', title) # collapse running whitespace
     }
 
     _cache.set(url, link)
@@ -100,7 +98,7 @@ def _format_link(ctx, url):
 
 
 @asyncio.coroutine
-def parse_message(ctx, content):
+def parse_message(ctx, content, max_urls=None):
     """Parse a message to extract the list special symbols
     (see: `Field`).
 
@@ -109,28 +107,32 @@ def parse_message(ctx, content):
     symbol list only contains the unqiue values for that symbol such
     that `len(set(symbols)) == len(symbols)`::
 
+        >>> loop = asyncio.get_event_loop()
         >>> content = '(smile)(smile)(wow)(frown)(frown)(upvote)(smile)'
         >>> result = loop.run_until_complete(parse_message(cxt, content))
         >>> print(result[Field.emoticons] == ['smile', 'wow', 'frown', 'upvote'])
         True
 
     Note that parsing does no input validation. The calling context
-    is responsible for the appropraite sanitation or truncation of
+    is responsible for the appropriate sanitation or truncation of
     content vis-à-vis performance.
 
     The one exception is urls. `parse_messages()` will only parse up
-    to `ctx.message.max_urlrs' number of urls in order to have a sane
+    to `max_urls` number of urls in order to have a sane
     default behavior.
 
-    :param ctx: context object containing, at minimum,the asyncio loop
-                and message config values.
-    :param content:
+    :param ctx: context object containing, at minimum, the asyncio loop
+    :param content: Message content
     :type content: str
+    :param max_urls: The maximum number of urls to parse or None for unlimited)
 
     :returns: json serialized dict of the lists of special symbols
     :rtype: str
-
+    :raises TypeError: If content is not str
     """
+    if not isinstance(content, str):
+        raise TypeError("Expected type str for content, got %s", type(content))
+
     LOG.debug('Parsing message; length: %s', len(content))
 
     # Create match generators of each of the special symbol types.
@@ -138,13 +140,13 @@ def parse_message(ctx, content):
     emoticons = (m.group() for m in Pattern.emoticon.finditer(content))
     urls = (m.group() for m in Pattern.url.finditer(content))
 
-    # Offload the link processing to separate coros since it might
+    # Offload the link processing to separate coroutines since it might
     # require making a network call to fetch the title.
     fs = []
     for count, url in enumerate(unique(urls)):
-        if count == ctx.message.max_urls:
+        if max_urls and count >= max_urls:
             LOG.debug('Skipping further urls, content exceeded the max_number'
-                      ' of urls max_urls: %s', ctx.message.max_urls)
+                      ' of urls max_urls: %s', max_urls)
             break
 
         coro = _format_link(ctx, url)
@@ -163,9 +165,9 @@ def parse_message(ctx, content):
     # Cohere the special symbols generators into a dict of unique lists
     # keyed by their symbol name.
     specials = {
-        Field.mentions : list(unique(mentions)),
-        Field.emoticons : list(unique(emoticons)),
-        Field.links : links, # links are filtered on url before format
+        Field.mentions: list(unique(mentions)),
+        Field.emoticons: list(unique(emoticons)),
+        Field.links: links,  # links are filtered on url before format
     }
 
     # Filter fields with empty lists

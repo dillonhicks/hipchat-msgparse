@@ -1,13 +1,10 @@
 """
-Grab bag of of utilites to assist in parsing and filtering content.
+Grab bag of of utilises to assist in parsing and filtering content.
 """
-import re
 import functools
-
-from io import BytesIO
-from itertools import filterfalse
-from enum import Enum
+import re
 from collections import namedtuple
+from io import BytesIO
 
 # 3rd Party Imports
 import lxml.etree
@@ -52,12 +49,12 @@ def filterdict(d, func=ident):
 
 
 def unique(iterable, key=ident):
-    """Filter duplicates from an interable while keeping order::
+    """Filter duplicates from an iterable while keeping order::
 
           unique([1,1,1,2,2,2,3,4]) -> [1,2,3,4]
 
     :param iterable: The iterable to filter
-    :param key: Function toextract the comparison
+    :param key: Function to extract the comparison
                 key from elements in the iterable.
     :default key: `ident`
 
@@ -74,11 +71,15 @@ def unique(iterable, key=ident):
 
 
 def immutable(clazz_name, **attrs):
-    """Immutable object factory backed by a namedtuple. It is only truely
-    immutable if the attributes are immutable as well.
+    """Immutable object factory backed by a namedtuple. It is only truly
+    immutable if the attributes are immutable as well. Great for one
+    one off instances for objects for which there does not need to be a
+    instantiable/mutable class (configs, constants, etc.)
 
     :param clazz_name: The name given to the namedtuple
     :param attrs: The attributes of the immutable object
+
+    :returns: An immutable object instantiated with `**attrs` as attributes.
     """
     clazz = namedtuple(clazz_name, attrs.keys())
     return clazz(**attrs)
@@ -115,13 +116,14 @@ class Response:
     #: print style (4 spaces per level of nesting).
     serialize = functools.partial(json.dumps, indent=4, separators=(',', ': '))
 
+
 class HTTP:
     """HTTP constants and verb functions"""
 
     #: The good status code for HTTP responses
     ok = 200
 
-     #: Asyncio friendly wrapper for requests.get with a timeout
+    #: Asyncio friendly wrapper for requests.get with a timeout
     get = functools.partial(requests.get, timeout=2.0)
 
 

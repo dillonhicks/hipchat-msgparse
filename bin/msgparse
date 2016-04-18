@@ -1,34 +1,22 @@
 #!/usr/bin/env python
-import sys
 import argparse
 import asyncio
 import logging
-
+import sys
+from pathlib import Path
 from enum import Enum
 
 from msgparse.parser import parse_message
 from msgparse.server import runserver
+from msgparse.utils import immutable
 
 LOG = logging.getLogger('msgparse')
 
+# Valid python version range [start,end)
+VERSION_MIN = (3, 4, 4)
+VERSION_MAX = (3, 5, 0)
+
 KiB = 2 ** 10
-
-class runtime_ctx:
-    """Hand constructed context class we can pass around without needing a
-    config and global variables. This is almost definitely not a good
-    for any specific usecase, but great for this example.
-    """
-
-    # Half open range [min, max)
-    version_min = (3, 4, 4)
-    version_max = (3, 5, 0)
-
-    loop = None
-
-    class message:
-        """Arbitrary but reasonable"""
-        max_urls = 4
-        max_size = 4 * KiB
 
 
 class Error(Enum):
@@ -47,10 +35,9 @@ class Error(Enum):
     fault = (2, 'Unhandled runtime fault')
 
 
-
-def check_version():
-    return (runtime_ctx.version_min <= sys.version_info) and \
-        (sys.version_info < runtime_ctx.version_max)
+if not (VERSION_MIN <= sys.version_info < VERSION_MAX):
+    print(Error.bad_pyversion)
+    raise SystemExit(Error.code)
 
 
 def parse_arguments():
@@ -66,30 +53,43 @@ def parse_arguments():
                         '(msg size: 1GiB, url count: 1M)')
 
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument('-c', '--content', nargs='+')
+    group.add_argument('-c', '--content', nargs='+',
+                       help='Parse a list of \" encased strings where each string '
+                       'is interpreted as a message')
+    group.add_argument('-f', '--file', type=lambda f: Path(f), dest='path',
+                       help='Parse the contents of a file where each line '
+                       'is parsed one message')
     group.add_argument('-s', '--server', action='store_true', default=False,
                        help='Run the parser as a unix socket TCP server')
 
     return parser.parse_args()
 
-def run(args):
+#: Arbitrary but reasonable from my experience.
+DEFAULTS = immutable('DefaultConfig', max_urls=10, max_size=4 * KiB)
+
+
+def run(args, ctx, config):
 
     if args.server:
-        runserver(runtime_ctx)
+        runserver(ctx, max_size=config.max_size, max_urls=config.max_urls)
+
+    elif args.path is not None:
+        with args.path.open('r') as msg_file:
+            for msg in msg_file:
+                content = msg[:config.max_size]
+                parser = parse_message(ctx, content, max_urls=config.max_urls)
+                result = ctx.loop.run_until_complete(parser)
+                print(result)
 
     else:
         for raw_content in args.content:
-            content = raw_content[:runtime_ctx.message.max_size]
-            parser = parse_message(runtime_ctx, content)
-            result = runtime_ctx.loop.run_until_complete(parser)
+            content = raw_content[:config.max_size]
+            parser = parse_message(ctx, content)
+            result = ctx.loop.run_until_complete(parser)
             print(result)
 
 
 def main():
-
-    if not check_version():
-        LOG.error('Exit: %s', Error.bad_pyversion)
-        raise SystemExit(Error.bad_pyversion.code)
 
     args = parse_arguments()
 
@@ -97,30 +97,32 @@ def main():
         logging.basicConfig(level=logging.DEBUG)
 
     if args.extreme:
-        runtime_ctx.message.max_size = KiB * KiB * KiB # GiB
-        runtime_ctx.message.max_urls = 10 ** 6
+        config = immutable('ExtremeConfig',
+                           max_size=KiB * KiB * KiB,
+                           max_urls=10 ** 6)
+    else:
+        config = DEFAULTS
 
-    LOG.debug('Initalizing asyncio event loop')
-    runtime_ctx.loop  = asyncio.get_event_loop()
-    returncode = Error.none
+    LOG.debug('Initializing asyncio event loop')
+    ctx = immutable('Context', loop=asyncio.get_event_loop())
+    exit_code = Error.none
 
     try:
-        run(args)
+        run(args, ctx, config)
     except Exception as e:
         LOG.exception('Unhandled exception')
-        returncode = Error.fault
+        exit_code = Error.fault
 
     LOG.debug('Stopping asyncio event loop')
-    runtime_ctx.loop.stop()
-    runtime_ctx.loop.close()
+    ctx.loop.stop()
+    ctx.loop.close()
 
-
-    if (returncode.code == 0):
-        LOG.debug('Exit: %s', returncode)
+    if exit_code.code == 0:
+        LOG.debug('Exit: %s', exit_code)
     else:
-        LOG.error('Exit: %s', returncode)
+        LOG.error('Exit: %s', exit_code)
 
-    raise SystemExit(returncode.code)
+    raise SystemExit(exit_code.code)
 
 
 if __name__ == '__main__':
