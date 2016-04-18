@@ -13,7 +13,7 @@ __all__ = ('parse_message',)
 LOG = logging.getLogger(__name__)
 
 #: How long to wait for net traffic when fetching titles
-_NET_TIMEOUT = 1.0 # sec
+_NET_TIMEOUT = 2.0 # sec
 
 #: _is_title(Element('<title   ./>)) -> True
 _is_title = Tag.is_('title')
@@ -118,8 +118,10 @@ def parse_message(ctx, content, max_urls=None):
     content vis-à-vis performance.
 
     The one exception is urls. `parse_messages()` will only parse up
-    to `max_urls` number of urls in order to have a sane
-    default behavior.
+    to `max_urls` number of urls, if specified. The internal timeouts
+    for network traffic are to place an upper bound on the amount of time
+    spent parsing the message since the symbol extraction is on the magnitude
+    of >250ms for very large text (1MB).
 
     :param ctx: context object containing, at minimum, the asyncio loop
     :param content: Message content
@@ -144,7 +146,7 @@ def parse_message(ctx, content, max_urls=None):
     # require making a network call to fetch the title.
     fs = []
     for count, url in enumerate(unique(urls)):
-        if max_urls and count >= max_urls:
+        if max_urls is not None and count >= max_urls:
             LOG.debug('Skipping further urls, content exceeded the max_number'
                       ' of urls max_urls: %s', max_urls)
             break

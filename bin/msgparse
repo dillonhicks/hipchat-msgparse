@@ -65,7 +65,7 @@ def parse_arguments():
     return parser.parse_args()
 
 #: Arbitrary but reasonable from my experience.
-DEFAULTS = immutable('DefaultConfig', max_urls=10, max_size=4 * KiB)
+DEFAULTS = immutable('DefaultConfig', max_urls=5, max_size=4 * KiB)
 
 
 def run(args, ctx, config):

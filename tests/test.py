@@ -88,6 +88,14 @@ class MessageParsingTests(unittest.TestCase):
         LOG.debug('%s', result)
         assert len(result) == 0
 
+    @unittest.expectedFailure
+    def test_not_str(self):
+        content = None
+        parser = parse_message(self.ctx, content)
+        result = json.loads(self.ctx.loop.run_until_complete(parser))
+        LOG.debug('%s', result)
+
+
     def test_no_specials(self):
         content = (
             'Resistance Is futile, lower your shields and prepare to be '

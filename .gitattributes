@@ -1,1 +1,2 @@
 test/monster.json -bin
+test/1mb-entry.txt -bin
