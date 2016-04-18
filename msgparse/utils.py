@@ -9,6 +9,7 @@ from io import BytesIO
 # 3rd Party Imports
 import lxml.etree
 import requests
+from requests.adapters import HTTPAdapter
 
 try:
     import simplejson as json
@@ -27,6 +28,9 @@ __all__ = (
     'first',
     'filterdict'
 )
+
+_HTTP_TIMEOUT = 2.0 # sec
+_HTTP_RETRIES = 0
 
 
 def ident(f):
@@ -119,12 +123,15 @@ class Response:
 
 class HTTP:
     """HTTP constants and verb functions"""
+    _session = requests.Session()
+    _session.mount('http://', HTTPAdapter(max_retries=0))
+    _session.mount('https://', HTTPAdapter(max_retries=0))
 
     #: The good status code for HTTP responses
     ok = 200
 
-    #: Asyncio friendly wrapper for requests.get with a timeout
-    get = functools.partial(requests.get, timeout=2.0)
+     #: Asyncio friendly wrapper for requests.get with a timeout
+    get = functools.partial(_session.get, timeout=_HTTP_TIMEOUT)
 
 
 class HTML:
